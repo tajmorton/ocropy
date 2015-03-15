@@ -17,7 +17,7 @@ def process1(job):
     output_fname = os.path.join(output_dir, "%04d.bin.png" % i)
     norm_fname = os.path.join(output_dir, "%04d.nrm.png" % i)
     raw_fname = os.path.join(output_dir, "%04d.raw.png" % i)
-    return binarize_image(fname,
+    return binarize_image(ocrolib.read_image_gray(fname),
                           output_fname=output_fname,
                           output_raw_fname=raw_fname,
                           output_norm_fname=norm_fname,
