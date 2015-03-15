@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
+import argparse
 import logging
+import multiprocessing
+import os
+import os.path
 
 from pylab import *
-from numpy.ctypeslib import ndpointer
-import argparse,os,os.path
 from scipy.ndimage import filters, interpolation, morphology, measurements
 from scipy import stats
-import multiprocessing
 import ocrolib
 
 
@@ -37,9 +38,9 @@ class BitDepthException(BinarizationException):
 
 
 def raise_for_image_error(image):
-    if len(image.shape)==3:
-       raise BitDepthException("Input image is color image: {shape}".format(
-                               shape=image.shape))
+    if len(image.shape) == 3:
+        raise BitDepthException("Input image is color image: {shape}".format(
+                                shape=image.shape))
 
     if mean(image) < median(image):
         raise InvertedImageException("Image may be inverted")
@@ -72,35 +73,49 @@ def estimate_scale(binary):
             continue
         scalemap[o] = A(o) ** 0.5
 
-    scale = median(scalemap[(scalemap>3)&(scalemap<100)])
+    scale = median(scalemap[(scalemap > 3) & (scalemap < 100)])
     return scale
+
 
 def estimate_skew_angle(image, angles, progress_timeout):
     estimates = []
     for a in angles:
-        v = mean(interpolation.rotate(image,a,order=0,mode='constant'),axis=1)
+        v = mean(
+            interpolation.rotate(image, a, order=0, mode='constant'),
+            axis=1)
         v = var(v)
-        estimates.append((v,a))
+        estimates.append((v, a))
     if progress_timeout:
-        plot([y for x,y in estimates],[x for x,y in estimates])
+        plot([y for x, y in estimates], [x for x, y in estimates])
         ginput(1, progress_timeout)
-    _,a = max(estimates)
+    _, a = max(estimates)
     return a
-    
-def select_regions(binary,f,min=0,nbest=100000):
-    labels,n = measurements.label(binary)
+
+
+def select_regions(binary, f, min=0, nbest=100000):
+    labels, n = measurements.label(binary)
     objects = measurements.find_objects(labels)
     scores = [f(o) for o in objects]
     best = argsort(scores)
-    keep = zeros(len(objects)+1,'B')
+    keep = zeros(len(objects)+1, 'B')
     for i in best[-nbest:]:
-        if scores[i]<=min: continue
+        if scores[i] <= min:
+            continue
         keep[i+1] = 1
     return keep[labels]
 
-def H(s): return s[0].stop-s[0].start
-def W(s): return s[1].stop-s[1].start
-def A(s): return W(s)*H(s)
+
+def H(s):
+    return s[0].stop - s[0].start
+
+
+def W(s):
+    return s[1].stop - s[1].start
+
+
+def A(s):
+    return W(s) * H(s)
+
 
 def dshow(image, info, duration):
     ion()
@@ -127,7 +142,6 @@ def binarize_image(filename,
                    black_est_percentile=5.0,
                    white_est_percentile=90.0,
                    binarization_threshold=0.5):
-    comment = ""
     raw = ocrolib.read_image_gray(filename)
 
     if progress_timeout:
@@ -135,19 +149,20 @@ def binarize_image(filename,
 
     # perform image normalization
     image = raw - amin(raw)
-    if amax(image) == amin(image): 
+    if amax(image) == amin(image):
         raise EmptyImageException("Image is empty.")
 
     image /= amax(image)
 
     if validate_image:
-        check = raise_for_image_error(amax(image) - image)
+        raise_for_image_error(amax(image) - image)
 
     # check whether the image is already effectively binarized
     if force_grayscale_conversion:
         extreme = 0
     else:
-        extreme = (sum(image<0.05)+sum(image>0.95))*1.0/prod(image.shape)
+        extreme = (sum(image < 0.05) + sum(image > 0.95))
+        extreme = extreme * 1.0/prod(image.shape)
 
     if extreme > 0.95:
         logger.info("No image normalization performed "
@@ -169,7 +184,7 @@ def binarize_image(filename,
             ginput(1, progress_timeout)
 
         w, h = minimum(array(image.shape), array(m.shape))
-        flat = clip(image[:w,:h]-m[:w,:h]+1, 0, 1)
+        flat = clip(image[:w, :h] - m[:w, :h]+1, 0, 1)
         if progress_timeout:
             clf()
             imshow(flat, vmin=0, vmax=1)
@@ -185,7 +200,7 @@ def binarize_image(filename,
         flat -= amin(flat)
 
         est = flat[o0:d0-o0, o1:d1-o1]
-        ma = max_skew_angle 
+        ma = max_skew_angle
         ms = int(2*max_skew_angle*skew_step_angle)
 
         angle = estimate_skew_angle(est, linspace(-ma, ma, ms+1),
@@ -205,11 +220,11 @@ def binarize_image(filename,
         # by default, we use only regions that contain
         # significant variance; this makes the percentile
         # based low and high estimates more reliable
-        e = text_region_mask_scale 
+        e = text_region_mask_scale
         v = est - filters.gaussian_filter(est, e*20.0)
         v = filters.gaussian_filter(v**2, e*20.0)**0.5
 
-        v = (v>0.3*amax(v))
+        v = (v > 0.3 * amax(v))
         v = morphology.binary_dilation(v, structure=ones((e*50, 1)))
         v = morphology.binary_dilation(v, structure=ones((1, e*50)))
 
@@ -230,7 +245,7 @@ def binarize_image(filename,
         imshow(flat, vmin=0, vmax=1)
         ginput(1, progress_timeout)
 
-    bin = 1*(flat>binarization_threshold)
+    bin = 1 * (flat > binarization_threshold)
 
     # output the normalized grayscale and the thresholded images
     logger.info("Normalization complete. Low={low}, high={high}, "
@@ -251,7 +266,6 @@ def binarize_image(filename,
 
     if output_norm_fname:
         ocrolib.write_image_gray(output_norm_fname, flat)
-
 
     return bin
 
@@ -278,25 +292,45 @@ if __name__ == "__main__":
     and historical book pages.
     """)
 
-    parser.add_argument('-n','--nocheck',action="store_true",
+    parser.add_argument('-n', '--nocheck', action="store_true",
                         help="disable error checking on inputs")
-    parser.add_argument('-t','--threshold',type=float,default=0.5,help='threshold, determines lightness')
-    parser.add_argument('-z','--zoom',type=float,default=0.5,help='zoom for page background estimation, smaller=faster')
-    parser.add_argument('-e','--escale',type=float,default=1.0,help='scale for estimating a mask over the text region')
-    parser.add_argument('-b','--bignore',type=float,default=0.1,help='ignore this much of the border for threshold estimation')
-    parser.add_argument('-p','--perc',type=float,default=80,help='percentage for filters')
-    parser.add_argument('-r','--range',type=float,default=20,help='range for filters')
-    parser.add_argument('-m','--maxskew',type=float,default=2,help='skew angle estimation parameters (degrees)')
-    parser.add_argument('-g','--gray',action='store_true',help='force grayscale processing even if image seems binary')
-    parser.add_argument('--lo',type=float,default=5,help='percentile for black estimation')
-    parser.add_argument('--hi',type=float,default=90,help='percentile for white estimation')
-    parser.add_argument('--skewsteps',type=int,default=8,help='steps for skew angle estimation (per degree)')
-    parser.add_argument('--progress', type=int, default=0, help='display intermediate results for [n] seconds')
-    parser.add_argument('--show', action='store_true', help='display final result')
-    parser.add_argument('--rawcopy',action='store_true',help='also copy the raw image')
-    parser.add_argument('-o','--output',default=None,help="output directory")
-    parser.add_argument('files',nargs='+')
-    parser.add_argument('-Q','--parallel',type=int,default=0)
+    parser.add_argument('-t', '--threshold', type=float, default=0.5,
+                        help='threshold, determines lightness')
+    parser.add_argument('-z', '--zoom', type=float, default=0.5,
+                        help='zoom for page background estimation, '
+                        'smaller=faster')
+    parser.add_argument('-e', '--escale', type=float, default=1.0,
+                        help='scale for estimating a mask '
+                        'over the text region')
+    parser.add_argument('-b', '--bignore', type=float, default=0.1,
+                        help='ignore this much of the border '
+                        'for threshold estimation')
+    parser.add_argument('-p', '--perc', type=float, default=80,
+                        help='percentage for filters')
+    parser.add_argument('-r', '--range', type=float, default=20,
+                        help='range for filters')
+    parser.add_argument('-m', '--maxskew', type=float, default=2,
+                        help='skew angle estimation parameters (degrees)')
+    parser.add_argument('-g', '--gray', action='store_true',
+                        help='force grayscale processing '
+                        'even if image seems binary')
+    parser.add_argument('--lo', type=float, default=5,
+                        help='percentile for black estimation')
+    parser.add_argument('--hi', type=float, default=90,
+                        help='percentile for white estimation')
+    parser.add_argument('--skewsteps', type=int, default=8,
+                        help='steps for skew angle estimation (per degree)')
+    parser.add_argument('--progress', type=int, default=0, metavar='N',
+                        help='display intermediate results for [N] seconds')
+    parser.add_argument('--show', action='store_true',
+                        help='display final result')
+    parser.add_argument('--rawcopy', action='store_true',
+                        help='write raw image to output directory')
+    parser.add_argument('-o', '--output', default=None,
+                        help="output directory")
+    parser.add_argument('files', nargs='+')
+    parser.add_argument('-Q', '--parallel', type=int, default=0,
+                        help='number of images to process simultaneously')
     args = parser.parse_args()
 
     args.files = ocrolib.glob_all(args.files)
@@ -305,7 +339,7 @@ if __name__ == "__main__":
         parser.print_help()
         sys.exit(0)
 
-    if args.progress > 0 or args.show > 0:
+    if args.parallel > 1 and (args.progress > 0 or args.show > 0):
         logger.warning("Cannot use multiple threads when showing "
                        "results or progress. Using single thread.")
         args.parallel = 0
