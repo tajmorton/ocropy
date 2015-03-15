@@ -75,15 +75,15 @@ def estimate_scale(binary):
     scale = median(scalemap[(scalemap>3)&(scalemap<100)])
     return scale
 
-def estimate_skew_angle(image,angles):
+def estimate_skew_angle(image, angles, progress_timeout):
     estimates = []
     for a in angles:
         v = mean(interpolation.rotate(image,a,order=0,mode='constant'),axis=1)
         v = var(v)
         estimates.append((v,a))
-    if args.debug>0:
+    if progress_timeout:
         plot([y for x,y in estimates],[x for x,y in estimates])
-        ginput(1,args.debug)
+        ginput(1, progress_timeout)
     _,a = max(estimates)
     return a
     
@@ -102,18 +102,19 @@ def H(s): return s[0].stop-s[0].start
 def W(s): return s[1].stop-s[1].start
 def A(s): return W(s)*H(s)
 
-def dshow(image,info):
+def dshow(image, info, duration):
     ion()
     gray()
     imshow(image)
     title(info)
-    ginput(1, True)
+    ginput(1, duration)
 
 
-def binarize_image(filename, output_fname,
+def binarize_image(filename,
+                   output_fname=None,
                    output_raw_fname=None,
                    output_norm_fname=None,
-                   show_progress=False,
+                   progress_timeout=0,
                    validate_image=False,
                    force_grayscale_conversion=False,
                    whitelevel_scale_amount=0.5,
@@ -129,8 +130,8 @@ def binarize_image(filename, output_fname,
     comment = ""
     raw = ocrolib.read_image_gray(filename)
 
-    if show_progress:
-        dshow(raw, "input")
+    if progress_timeout:
+        dshow(raw, "input", progress_timeout)
 
     # perform image normalization
     image = raw - amin(raw)
@@ -162,21 +163,21 @@ def binarize_image(filename, output_fname,
         m = filters.percentile_filter(m, whitelevel_percentile,
                                       size=(2, whitelevel_range))
         m = interpolation.zoom(m, 1.0/whitelevel_scale_amount)
-        if show_progress:
+        if progress_timeout:
             clf()
             imshow(m, vmin=0, vmax=1)
-            ginput(1, True)
+            ginput(1, progress_timeout)
 
         w, h = minimum(array(image.shape), array(m.shape))
         flat = clip(image[:w,:h]-m[:w,:h]+1, 0, 1)
-        if show_progress:
+        if progress_timeout:
             clf()
             imshow(flat, vmin=0, vmax=1)
-            ginput(1, True)
+            ginput(1, progress_timeout)
 
     # estimate skew angle and rotate
     if max_skew_angle > 0:
-        logger.info("Estimating skew angle.")
+        logger.info("Estimating skew angle")
         d0, d1 = flat.shape
         o0, o1 = int(border_ignore_amount*d0), int(border_ignore_amount*d1)
 
@@ -187,7 +188,8 @@ def binarize_image(filename, output_fname,
         ma = max_skew_angle 
         ms = int(2*max_skew_angle*skew_step_angle)
 
-        angle = estimate_skew_angle(est, linspace(-ma, ma, ms+1))
+        angle = estimate_skew_angle(est, linspace(-ma, ma, ms+1),
+                                    progress_timeout)
         flat = interpolation.rotate(flat, angle, mode='constant', reshape=0)
         flat = amax(flat) - flat
     else:
@@ -211,9 +213,9 @@ def binarize_image(filename, output_fname,
         v = morphology.binary_dilation(v, structure=ones((e*50, 1)))
         v = morphology.binary_dilation(v, structure=ones((1, e*50)))
 
-        if show_progress:
+        if progress_timeout:
             imshow(v)
-            ginput(1, True)
+            ginput(1, progress_timeout)
         est = est[v]
 
     lo = stats.scoreatpercentile(est.ravel(), black_est_percentile)
@@ -224,9 +226,9 @@ def binarize_image(filename, output_fname,
     flat -= lo
     flat /= (hi-lo)
     flat = clip(flat, 0, 1)
-    if show_progress:
+    if progress_timeout:
         imshow(flat, vmin=0, vmax=1)
-        ginput(1, True)
+        ginput(1, progress_timeout)
 
     bin = 1*(flat>binarization_threshold)
 
@@ -235,19 +237,23 @@ def binarize_image(filename, output_fname,
                 "angle={angle}.".format(low=lo, high=hi, angle=angle))
 
     logger.info("Writing image")
-    if show_progress:
+    if progress_timeout:
         clf()
         gray()
         imshow(bin)
-        ginput(1, True)
+        ginput(1, progress_timeout)
 
-    ocrolib.write_image_binary(output_fname, bin)
+    if output_fname:
+        ocrolib.write_image_binary(output_fname, bin)
 
     if output_raw_fname:
         ocrolib.write_image_gray(output_raw_fname, raw)
 
     if output_norm_fname:
         ocrolib.write_image_gray(output_norm_fname, flat)
+
+
+    return bin
 
 
 def process1(job):
@@ -285,8 +291,8 @@ if __name__ == "__main__":
     parser.add_argument('--lo',type=float,default=5,help='percentile for black estimation')
     parser.add_argument('--hi',type=float,default=90,help='percentile for white estimation')
     parser.add_argument('--skewsteps',type=int,default=8,help='steps for skew angle estimation (per degree)')
-    parser.add_argument('--debug',type=float,default=0,help='display intermediate results')
-    parser.add_argument('--show',action='store_true',help='display final result')
+    parser.add_argument('--progress', type=int, default=0, help='display intermediate results for [n] seconds')
+    parser.add_argument('--show', action='store_true', help='display final result')
     parser.add_argument('--rawcopy',action='store_true',help='also copy the raw image')
     parser.add_argument('-o','--output',default=None,help="output directory")
     parser.add_argument('files',nargs='+')
@@ -299,7 +305,9 @@ if __name__ == "__main__":
         parser.print_help()
         sys.exit(0)
 
-    if args.debug > 0 or args.show > 0:
+    if args.progress > 0 or args.show > 0:
+        logger.warning("Cannot use multiple threads when showing "
+                       "results or progress. Using single thread.")
         args.parallel = 0
 
     if args.output:
@@ -309,6 +317,7 @@ if __name__ == "__main__":
         args.output = os.getcwd()
 
     binarization_config = {
+        "progress_timeout": args.progress,
         "validate_image": not args.nocheck,
         "force_grayscale_conversion": args.gray,
         "whitelevel_scale_amount": args.zoom,
@@ -325,7 +334,9 @@ if __name__ == "__main__":
 
     if args.parallel < 2:
         for i, f in enumerate(args.files):
-            process1((f, i+1, args.output, binarization_config))
+            image = process1((f, i+1, args.output, binarization_config))
+            if args.show:
+                dshow(image, "%s (%d)" % (f, i), 0)
     else:
         pool = multiprocessing.Pool(processes=args.parallel)
         jobs = []
