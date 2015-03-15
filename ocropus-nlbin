@@ -42,7 +42,8 @@ def raise_for_image_error(image):
         raise BitDepthException("Input image is color image: {shape}".format(
                                 shape=image.shape))
 
-    if mean(image) < median(image):
+    inverted = amax(image) - image
+    if mean(inverted) < median(inverted):
         raise InvertedImageException("Image may be inverted")
 
     h, w = image.shape
@@ -71,6 +72,7 @@ def estimate_skew_angle(image, angles, progress_timeout):
             axis=1)
         v = var(v)
         estimates.append((v, a))
+    progress_timeout=3
     if progress_timeout:
         plot([y for x, y in estimates], [x for x, y in estimates])
         ginput(1, progress_timeout)
@@ -109,21 +111,25 @@ def binarize_image(filename,
         dshow(raw, "input", progress_timeout)
 
     # perform image normalization
-    image = raw - amin(raw)
+    image = raw - amin(raw)  # rescale so darkest regions are 0
     if amax(image) == amin(image):
         raise EmptyImageException("Image is empty.")
 
+    # Rescale image so channels are between 0-1
     image /= amax(image)
 
     if validate_image:
-        raise_for_image_error(amax(image) - image)
+        raise_for_image_error(image)
 
     # check whether the image is already effectively binarized
     if force_grayscale_conversion:
         extreme = 0
     else:
-        extreme = (sum(image < 0.05) + sum(image > 0.95))
-        extreme = extreme * 1.0/prod(image.shape)
+        # Count of pixels which are very dark or very light
+        num_extreme = (sum(image < 0.05) + sum(image > 0.95))
+
+        # Percentage of pixels which are very dark or very light
+        extreme = float(num_extreme)/prod(image.shape)
 
     if extreme > 0.95:
         logger.info("No image normalization performed "
@@ -132,12 +138,18 @@ def binarize_image(filename,
     else:
         # if not, we need to flatten it by estimating the local whitelevel
         logger.info("Flattening image")
-        m = interpolation.zoom(image, whitelevel_scale_amount)
-        m = filters.percentile_filter(m, whitelevel_percentile,
+        scaled = interpolation.zoom(image, whitelevel_scale_amount)
+
+        # Apply percentile filter along the x axis (whitelevel_range
+        # pixels in X, 2 in Y):
+        m = filters.percentile_filter(scaled, whitelevel_percentile,
                                       size=(whitelevel_range, 2))
 
+        # Apply percentile filter to already-filtered image along the y axis:
         m = filters.percentile_filter(m, whitelevel_percentile,
                                       size=(2, whitelevel_range))
+
+        # Rescale white-level back to orig. size:
         m = interpolation.zoom(m, 1.0/whitelevel_scale_amount)
         if progress_timeout:
             clf()
@@ -145,7 +157,10 @@ def binarize_image(filename,
             ginput(1, progress_timeout)
 
         w, h = minimum(array(image.shape), array(m.shape))
-        flat = clip(image[:w, :h] - m[:w, :h]+1, 0, 1)
+        # Threshold image by computing (image - white-level),
+        # removing bright splotches.
+        flat = clip(image[:w, :h] - m[:w, :h] + 1, 0, 1)
+
         if progress_timeout:
             clf()
             imshow(flat, vmin=0, vmax=1)
@@ -160,8 +175,10 @@ def binarize_image(filename,
         flat = amax(flat) - flat
         flat -= amin(flat)
 
+        # Flattened image with margin cropped out for skew estimation:
         est = flat[o0:d0-o0, o1:d1-o1]
         ma = max_skew_angle
+        # Total number of rotations to test: 
         ms = int(2*max_skew_angle*skew_step_angle)
 
         angle = estimate_skew_angle(est, linspace(-ma, ma, ms+1),
