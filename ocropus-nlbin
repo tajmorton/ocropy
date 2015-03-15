@@ -63,20 +63,6 @@ def raise_for_image_error(image):
     return True
 
 
-def estimate_scale(binary):
-    objects = binary_objects(binary)
-    bysize = sorted(objects, key=A)
-    scalemap = zeros(binary.shape)
-
-    for o in bysize:
-        if amax(scalemap[o]) > 0:
-            continue
-        scalemap[o] = A(o) ** 0.5
-
-    scale = median(scalemap[(scalemap > 3) & (scalemap < 100)])
-    return scale
-
-
 def estimate_skew_angle(image, angles, progress_timeout):
     estimates = []
     for a in angles:
@@ -90,31 +76,6 @@ def estimate_skew_angle(image, angles, progress_timeout):
         ginput(1, progress_timeout)
     _, a = max(estimates)
     return a
-
-
-def select_regions(binary, f, min=0, nbest=100000):
-    labels, n = measurements.label(binary)
-    objects = measurements.find_objects(labels)
-    scores = [f(o) for o in objects]
-    best = argsort(scores)
-    keep = zeros(len(objects)+1, 'B')
-    for i in best[-nbest:]:
-        if scores[i] <= min:
-            continue
-        keep[i+1] = 1
-    return keep[labels]
-
-
-def H(s):
-    return s[0].stop - s[0].start
-
-
-def W(s):
-    return s[1].stop - s[1].start
-
-
-def A(s):
-    return W(s) * H(s)
 
 
 def dshow(image, info, duration):
