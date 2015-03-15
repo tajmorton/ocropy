@@ -94,7 +94,17 @@ def deprecated(f):
             return f(*args,**kw)
     return _wrap
 
-
+
+################################################################
+# debugging tools
+################################################################
+def dshow(image, info, duration):
+    ion()
+    gray()
+    imshow(image)
+    title(info)
+    ginput(1, duration)
+
 
 ################################################################
 # text normalization
