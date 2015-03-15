@@ -72,7 +72,6 @@ def estimate_skew_angle(image, angles, progress_timeout):
             axis=1)
         v = var(v)
         estimates.append((v, a))
-    progress_timeout=3
     if progress_timeout:
         plot([y for x, y in estimates], [x for x, y in estimates])
         ginput(1, progress_timeout)
