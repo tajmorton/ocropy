@@ -5,59 +5,11 @@ from scipy.ndimage import filters, interpolation, morphology, measurements
 from scipy import stats
 
 import ocrolib
-from .common import OcropusException
 from .common import dshow
+from .common import raise_for_image_errors
 
 logger = logging.getLogger("ocropus.ocrolib.binarization")
 logger.setLevel(logging.DEBUG)
-
-
-class BinarizationException(OcropusException):
-    pass
-
-
-class EmptyImageException(BinarizationException):
-    pass
-
-
-class PageSizeException(BinarizationException):
-    pass
-
-
-class InvertedImageException(BinarizationException):
-    pass
-
-
-class BitDepthException(BinarizationException):
-    pass
-
-
-def raise_for_image_error(image):
-    if len(image.shape) == 3:
-        raise BitDepthException("Input image is color image: {shape}".format(
-                                shape=image.shape))
-
-    inverted = amax(image) - image
-    if mean(inverted) < median(inverted):
-        raise InvertedImageException("Image may be inverted")
-
-    h, w = image.shape
-
-    if h < 600:
-        raise PageSizeException("Image not tall enough for a page image: "
-                                "{shape}".format(shape=image.shape))
-    elif h > 10000:
-        raise PageSizeException("Image too tall for a page image: "
-                                "{shape}".format(shape=image.shape))
-    elif w < 600:
-        raise PageSizeException("Image too narrow for a page image "
-                                "{shape}".format(shape=image.shape))
-    elif w > 10000:
-        raise PageSizeException("Line too wide for a page image "
-                                "{shape}".format(shape=image.shape))
-
-    return True
-
 
 def estimate_skew_angle(image, angles, progress_timeout):
     estimates = []
@@ -135,7 +87,7 @@ def binarize_image(input_image,
     image /= amax(image)
 
     if validate_image:
-        raise_for_image_error(image)
+        raise_for_image_errors(image)
 
     # check whether the image is already effectively binarized
     if force_grayscale_conversion:

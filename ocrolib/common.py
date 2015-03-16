@@ -82,6 +82,34 @@ class FileNotFound(OcropusException):
     def __str__(self):
         return "file not found %s"%(self.fname,)
 
+
+class EmptyImageException(BadImage):
+    pass
+
+
+class PageSizeException(BadImage):
+    pass
+
+
+class InvertedImageException(BadImage):
+    pass
+
+
+class BitDepthException(BadImage):
+    pass
+
+
+class ConnectedComponentsException(BadImage):
+    pass
+
+
+class SegmentationException(BadImage):
+    pass
+
+
+class DocumentScaleException(SegmentationException):
+    pass
+
 pickle_mode = 2
 
 def deprecated(f):
@@ -93,6 +121,73 @@ def deprecated(f):
                 warned = 1
             return f(*args,**kw)
     return _wrap
+
+
+################################################################
+# image validation 
+################################################################
+def raise_for_image_color_error(image):
+    if len(image.shape) == 3:
+        raise BitDepthException("Input image is color image: {shape}".format(
+                                shape=image.shape))
+
+    inverted = amax(image) - image
+    if mean(inverted) < median(inverted):
+        raise InvertedImageException("Image may be inverted")
+
+    return True
+
+
+def raise_for_image_shape_error(image):
+    h, w = image.shape
+
+    if h < 600:
+        raise PageSizeException("Image not tall enough for a page image: "
+                                "{shape}".format(shape=image.shape))
+    elif h > 10000:
+        raise PageSizeException("Image too tall for a page image: "
+                                "{shape}".format(shape=image.shape))
+    elif w < 600:
+        raise PageSizeException("Image too narrow for a page image "
+                                "{shape}".format(shape=image.shape))
+    elif w > 10000:
+        raise PageSizeException("Line too wide for a page image "
+                                "{shape}".format(shape=image.shape))
+
+    return True
+
+
+def raise_for_image_connected_components_error(image):
+    inverted = amax(image) - image
+    h, w = image.shape
+
+    slots = int(w*h*1.0/(30*30))
+
+    _, ncomps = measurements.label(inverted > mean(inverted))
+    if ncomps < 10:
+        raise ConnectedComponentsException("Too few connected components for "
+                                           "a page image (got %d)" % ncomps)
+    if ncomps > slots:
+        raise ConnectedComponentsException("Too many connnected components "
+                                           "for a page image "
+                                           "({comps} > {slots})".format(
+                                           comps=ncomps, slots=slots))
+
+    return True
+
+
+def raise_for_image_errors(image, color=True, shape=True,
+                           connected_components=False):
+    if color:
+        raise_for_image_color_error(image)
+
+    if shape:
+        return raise_for_image_shape_error(image)
+
+    if connected_components:
+        return raise_for_image_connected_components(image)
+
+    return True
 
 
 ################################################################
